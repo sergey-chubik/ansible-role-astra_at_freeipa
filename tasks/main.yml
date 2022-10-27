@@ -1,0 +1,517 @@
+---
+# tasks file for astra_at_freeipa
+
+- name: astra_at_freeipa | Creation of directory for repositories
+  file:
+    path: "{{ astra_at_freeipa_repo_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  when: (astra_at_freeipa_repo_main_local_create or astra_at_freeipa_repo_update_local_create) and inventory_hostname == astra_at_freeipa_domain_server
+
+- block:
+    - name: astra_at_freeipa | Mount ISO images "{% if ansible_facts.distribution_version == '1.7_x86-64' %}{{ astra_at_freeipa_iso_main_17 }}{% else %}{{ astra_at_freeipa_iso_main_16 }}{% endif %}" read-only
+      mount:
+        path: "{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_iso1 }}"
+        src: "{{ astra_at_freeipa_iso_path }}/{% if ansible_facts.distribution_version == '1.7_x86-64' %}{{ astra_at_freeipa_iso_main_17 }}{% else %}{{ astra_at_freeipa_iso_main_16 }}{% endif %}"
+        fstype: iso9660
+        opts: ro,noauto
+        state: mounted
+    
+    - name: astra_at_freeipa | Synchronize file from ISO images to repositories Main
+      synchronize:
+        src: "{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_iso1 }}/"
+        dest: "{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_main }}"
+        recursive: yes
+      delegate_to: "{{ inventory_hostname }}"
+
+    - name: astra_at_freeipa | Unmount ISO images Main
+      mount:
+        path: "{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_iso1 }}"
+        state: absent
+  when: inventory_hostname == astra_at_freeipa_domain_server and astra_at_freeipa_repo_main_local_create
+
+- block:
+    - name: astra_at_freeipa | Mount ISO images "{% if ansible_facts.distribution_version == '1.7_x86-64' %}{{ astra_at_freeipa_iso_update_17 }}{% else %}{{ astra_at_freeipa_iso_update_16 }}{% endif %}" read-only
+      mount:
+        path: "{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_iso2 }}"
+        src: "{{ astra_at_freeipa_iso_path }}/{% if ansible_facts.distribution_version == '1.7_x86-64' %}{{ astra_at_freeipa_iso_update_17 }}{% else %}{{ astra_at_freeipa_iso_update_16 }}{% endif %}"
+        fstype: iso9660
+        opts: ro,noauto
+        state: mounted
+    
+    - name: astra_at_freeipa | Synchronize file from ISO images to repositories Update
+      synchronize:
+        src: "{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_iso2 }}/"
+        dest: "{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_update }}"
+        recursive: yes
+      delegate_to: "{{ inventory_hostname }}"
+
+    - name: astra_at_freeipa | Unmount ISO images Update
+      mount:
+        path: "{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_iso2 }}"
+        state: absent
+  when: inventory_hostname == astra_at_freeipa_domain_server and astra_at_freeipa_repo_update_local_create
+
+- name: astra_at_freeipa | Setting repositories in sources.list
+  template:
+    src: "{{ astra_at_freeipa_templates_path }}/sources.list.j2"
+    dest: /etc/apt/sources.list
+    owner: root
+    group: root
+    mode: '0644'
+
+# ###############################################################################################
+- name: astra_at_freeipa | Setting the hosts file
+  template:
+    src: "{{ astra_at_freeipa_templates_path }}/hosts.j2"
+    dest: /etc/hosts
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: astra_at_freeipa | Set a hostname
+  shell: hostnamectl set-hostname "{{ inventory_hostname }}"
+  when: ansible_hostname != inventory_hostname
+
+- name: astra_at_freeipa | Setting the resolv.conf file
+  template:
+    src: "{{ astra_at_freeipa_templates_path }}/resolv.conf.j2"
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- block:
+    - name: astra_at_freeipa | Install Apache Server
+      apt:
+        name: apache2
+        state: present
+        update_cache: yes
+    
+    - name: astra_at_freeipa | Create a symbolic link repo
+      file:
+        src: /srv/repo/
+        path: /var/www/html/repo
+        owner: root
+        group: root
+        state: link
+    
+    - name: astra_at_freeipa | Setting default site Apache
+      template:
+        src: "{{ astra_at_freeipa_templates_path }}/000-default.conf.j2"
+        dest: /etc/apache2/sites-available/000-default.conf
+        owner: root
+        group: root
+        mode: '0644'
+      register: astra_at_freeipa_apache_default_site
+    
+    - name: astra_at_freeipa | Configure file apache2.conf
+      lineinfile:
+        path: /etc/apache2/apache2.conf
+        regexp: 'AstraMode on|off'
+        line: AstraMode off
+        insertafter: '^# Astra security mode.*'
+      register: astra_at_freeipa_apache_config
+    
+    - name: astra_at_freeipa | Restart service Apache
+      service:
+        name: apache2
+        state: restarted
+      when: astra_at_freeipa_apache_default_site.changed or astra_at_freeipa_apache_config.changed
+  when: inventory_hostname == astra_at_freeipa_domain_server
+
+# # ##########################################
+# # ## Section Update Grub
+- block:
+    - name: astra_at_freeipa | Configure file grub
+      lineinfile:
+        path: /etc/default/grub
+        regexp: "{{ item.src }}"
+        line: "{{ item.dest }}"
+      loop:
+        - { src: '^GRUB_TIMEOUT=.*', dest: 'GRUB_TIMEOUT={{ astra_at_freeipa_grub_timeout }}' }
+        - { src: '^GRUB_DISABLE_RECOVERY=.*', dest: 'GRUB_DISABLE_RECOVERY="true"' }
+      register: astra_at_freeipa_grub_config
+    
+    - name: astra_at_freeipa | Create hash password for grub
+      expect:
+        command: /bin/bash -c "grub-mkpasswd-pbkdf2"
+        responses:
+          (.*)Введите пароль(.*): "{{ astra_at_freeipa_grub_password }}"
+          (.*)Повторно введите пароль(.*): "{{ astra_at_freeipa_grub_password }}"
+      register: astra_at_freeipa_grub_password_hash
+    
+    - name: astra_at_freeipa | Setting password for grub
+      template:
+        src: "{{ astra_at_freeipa_templates_path }}/07_password.j2"
+        dest: /etc/grub.d/07_password
+        owner: root
+        group: root
+        mode: '0755'
+      register: astra_at_freeipa_grub_password_add
+    
+    - name: astra_at_freeipa | Update grub
+      shell: update-grub
+      when: astra_at_freeipa_grub_config.changed or astra_at_freeipa_grub_password_add.changed
+  when: astra_at_freeipa_grub_edit
+
+# #####################################################
+# ## Section Update OS
+- block:
+    - name: astra_at_freeipa | Upgrade Astra OS via dist-upgrade
+      apt:
+        upgrade: dist
+        update_cache: yes
+        autoremove: yes
+      when: astra_at_freeipa_os_update_tool == "dist_upgrade"
+    
+    - block:
+        - name: astra_at_freeipa | Install package astra-update
+          apt:
+            name: astra-update
+            update_cache: yes
+        
+        - name: astra_at_freeipa | Upgrade Astra OS via astra-update
+          shell: /bin/bash -c "sudo astra-update -A -r"
+      when: astra_at_freeipa_os_update_tool == "astra_update"
+  when: astra_at_freeipa_os_update
+# #####################################################
+
+- name: astra_at_freeipa | Configuration of a memory cleaning policy
+  replace:
+    path: "{{ item.path }}"
+    regexp: "{{ item.src }}"
+    replace: "{{ item.dest }}"
+  loop:
+    - { path: '/etc/fstab', src: 'errors=remount-ro[\t ]', dest: 'errors=remount-ro,secdelrnd={{ astra_at_freeipa_fstab_secdelrnd }} ' }
+    - { path: '/etc/fstab', src: 'defaults[\t ]', dest: 'defaults,secdelrnd={{ astra_at_freeipa_fstab_secdelrnd }} ' }
+    - { path: '/etc/parsec/swap_wiper.conf', src: '^ENABLED=.*', dest: 'ENABLED=Y' }
+
+- name: astra_at_freeipa | Setting up the program Afick
+  template:
+    src: "{{ astra_at_freeipa_templates_path }}/afick.conf.j2"
+    dest: /etc/afick.conf
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: astra_at_freeipa | Setting a record for CD-disk under mandate level
+  lineinfile:
+    path: /usr/sbin/pdp-init-fs
+    regexp: '^/usr/sbin/pdpl-file\s+"0:0:0:ehole"\s+/dev/sr*'
+    line: /usr/sbin/pdpl-file "0:0:0:ehole"      /dev/sr*
+    insertafter: '^fi'
+
+- name: astra_at_freeipa | Setup Local mandate level
+  template:
+    src: "{{ astra_at_freeipa_templates_path }}/mac_levels.j2"
+    dest: /etc/parsec/mac_levels
+    owner: root
+    group: root
+    mode: '0644'
+
+# #####################################################
+# ## Section Settings FreeIPA
+- name: astra_at_freeipa | Install FreeIPA Server
+  apt:
+    name: fly-admin-freeipa-server
+  environment:
+    DEBIAN_FRONTEND: "noninteractive"
+  register: astra_at_freeipa_server_packages_install
+  when: inventory_hostname == astra_at_freeipa_domain_server
+
+- name: astra_at_freeipa | Install FreeIPA Client
+  apt:
+    name:
+    - fly-admin-freeipa-client
+    - libpam-mount
+    - cifs-utils
+  register: astra_at_freeipa_client_packages_install
+  when: inventory_hostname != astra_at_freeipa_domain_server
+
+- block:
+    - name: astra_at_freeipa | Initialization Server FreeIPA
+      shell: astra-freeipa-server -d {{ astra_at_freeipa_domain_name }} -n {{ astra_at_freeipa_domain_server }} -ip {{ ansible_default_ipv4.address|default(ansible_all_ipv4_addresses[0]) }} -p {{ astra_at_freeipa_domain_admin_password }} -s -o -y
+    
+    - name: astra_at_freeipa | Create up the default maclevels FreeIPA
+      shell: |
+        ipa maclevels-add "{{ astra_at_freeipa_domain_namelevel0 }}" --maclevel=0
+        ipa maclevels-add "{{ astra_at_freeipa_domain_namelevel1 }}" --maclevel=1
+        ipa maclevels-add "{{ astra_at_freeipa_domain_namelevel2 }}" --maclevel=2
+        ipa maclevels-add "{{ astra_at_freeipa_domain_namelevel3 }}" --maclevel=3
+
+    - name: astra_at_freeipa | Add users on server FreeIPA
+      ipa_user:
+        name: "{{ item [0] }}"
+        state: present
+        givenname: "{{ item [0] }}"
+        displayname: "{{ item [0] }}"
+        sn: "{{ item [0] }}"
+        password: "{{ astra_at_freeipa_domain_users_password }}"
+        krbpasswordexpiration: "{{ astra_at_freeipa_domain_users_password_expiration }}"
+        ipa_host: "{{ astra_at_freeipa_domain_server }}.{{ astra_at_freeipa_domain_name }}"
+        ipa_user: "{{ astra_at_freeipa_domain_admin }}"
+        ipa_pass: "{{ astra_at_freeipa_domain_admin_password }}"
+        validate_certs: no
+        # # update_password: on_create  # добавлен в Ansible 2.8
+      register: astra_at_freeipa_domain_users_create
+      loop: "{{ astra_at_freeipa_domain_users }}"
+      when: astra_at_freeipa_server_packages_install.changed
+    
+    - name: astra_at_freeipa | Setting maclevels for users FreeIPA
+      shell: ipa user-mod "{{ item [0]}}" --macmin=0 --macmax=3
+      loop: "{{ astra_at_freeipa_domain_users }}"
+      when: astra_at_freeipa_domain_users_create.changed and astra_at_freeipa_server_packages_install.changed
+    
+    - name: astra_at_freeipa | Creating groups for each user FreeIPA
+      ipa_group:
+        name: "{{ item [1] }}"
+        description: Group for "{{ item [0] }}"
+        user: "{{ item [0] }}"
+        ipa_host: "{{ astra_at_freeipa_domain_server }}.{{ astra_at_freeipa_domain_name }}"
+        ipa_user: "{{ astra_at_freeipa_domain_admin }}"
+        ipa_pass: "{{ astra_at_freeipa_domain_admin_password }}"
+        validate_certs: no
+      loop: "{{ astra_at_freeipa_domain_users }}"
+
+    - name: astra_at_freeipa | Create group for share directory on server FreeIPA
+      ipa_group:
+        name: "{{ astra_at_freeipa_group_conf_dir }}"
+        description: Group for share directory FreeIPA
+        user: "{{ astra_at_freeipa_domain_users_list }}"
+        ipa_host: "{{ astra_at_freeipa_domain_server }}.{{ astra_at_freeipa_domain_name }}"
+        ipa_user: "{{ astra_at_freeipa_domain_admin }}"
+        ipa_pass: "{{ astra_at_freeipa_domain_admin_password }}"
+        validate_certs: no
+  when: astra_at_freeipa_server_packages_install.changed and inventory_hostname == astra_at_freeipa_domain_server
+
+- block:
+    - name: astra_at_freeipa | Edit the file template Samba on server FreeIPA
+      template:
+        src: "{{ astra_at_freeipa_templates_path }}/smb.conf.j2"
+        dest: /etc/samba/smb.conf
+        owner: root
+        group: root
+        mode: '0644'
+      register: astra_at_freeipa_smb_template
+    
+    - block:
+        - name: astra_at_freeipa | Restart service smbd on server FreeIPA
+          service:
+            name: smbd
+            state: restarted
+        
+        # - name: astra_at_freeipa | Restart service nmbd on server FreeIPA
+        #   service:
+        #     name: nmbd
+        #     state: restarted
+      when: astra_at_freeipa_smb_template.changed
+  when: inventory_hostname == astra_at_freeipa_domain_server
+
+- name: astra_at_freeipa | reset ssh connection to allow user changes to affect 'current login user'
+  meta: reset_connection
+
+- block:
+    - name: astra_at_freeipa | Create a common resource for confedential documents
+      file:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ astra_at_freeipa_owner_conf_dir }}@{{ astra_at_freeipa_domain_name }}"
+        group: "{{ astra_at_freeipa_group_conf_dir }}"
+      register: astra_at_freeipa_create_conf_dir
+      loop:
+        - "{{ astra_at_freeipa_namedir_ns }}"
+        - "{{ astra_at_freeipa_namedir_dsp }}"
+        - "{{ astra_at_freeipa_namedir_s }}"
+        - "{{ astra_at_freeipa_namedir_ss }}"
+    
+    - name: astra_at_freeipa | Edit mandate level confedential directory
+      shell: |
+        pdpl-file 3:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"
+        pdpl-file 1:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_dsp }}"
+        pdpl-file 2:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_s }}"
+        pdpl-file 3:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_ss }}"
+      when: astra_at_freeipa_create_conf_dir.changed
+    
+    - name: astra_at_freeipa | Create a confedential directory Share
+      file:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ item }}/общая"
+        state: directory
+        mode: '2770'
+        owner: "{{ astra_at_freeipa_owner_conf_dir }}@{{ astra_at_freeipa_domain_name }}"
+        group: "{{ astra_at_freeipa_group_conf_dir }}"
+      register: astra_at_freeipa_create_conf_dir_share
+      loop:
+        - "{{ astra_at_freeipa_namedir_ns }}"
+        - "{{ astra_at_freeipa_namedir_dsp }}"
+        - "{{ astra_at_freeipa_namedir_s }}"
+        - "{{ astra_at_freeipa_namedir_ss }}"
+    
+    - name: astra_at_freeipa | Sets default ACL for confedential directory Share
+      acl:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ item }}/общая"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      loop:
+        - "{{ astra_at_freeipa_namedir_ns }}"
+        - "{{ astra_at_freeipa_namedir_dsp }}"
+        - "{{ astra_at_freeipa_namedir_s }}"
+        - "{{ astra_at_freeipa_namedir_ss }}"
+    
+    - name: astra_at_freeipa | Edit mandate level confedential directory Share
+      shell: |
+        pdpl-file 1:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_dsp }}"/общая
+        pdpl-file 2:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_s }}"/общая
+        pdpl-file 3:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_ss }}"/общая
+      when: astra_at_freeipa_create_conf_dir_share.changed
+    
+    - name: astra_at_freeipa | Create directory Users {{ astra_at_freeipa_namedir_ns }}
+      file:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ astra_at_freeipa_namedir_ns }}/{{ item [0] }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ item [0] }}@{{ astra_at_freeipa_domain_name }}"
+        group: "{{ item [1] }}"
+      loop: "{{ astra_at_freeipa_domain_users }}"
+    
+    - name: astra_at_freeipa | Sets default ACL for directory Users {{ astra_at_freeipa_namedir_ns }}
+      acl:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ astra_at_freeipa_namedir_ns }}/{{ item [0] }}"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      loop: "{{ astra_at_freeipa_domain_users }}"
+    
+    - name: astra_at_freeipa | Create directory Users {{ astra_at_freeipa_namedir_dsp }}
+      file:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ astra_at_freeipa_namedir_dsp }}/{{ item [0] }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ item [0] }}@{{ astra_at_freeipa_domain_name }}"
+        group: "{{ item [1] }}"
+      register: astra_at_freeipa_create_conf_dir_dsp_users
+      loop: "{{ astra_at_freeipa_domain_users }}"
+    
+    - name: astra_at_freeipa | Sets default ACL for directory Users {{ astra_at_freeipa_namedir_dsp }}
+      acl:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ astra_at_freeipa_namedir_dsp }}/{{ item [0] }}"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      loop: "{{ astra_at_freeipa_domain_users }}"
+    
+    - name: astra_at_freeipa | Edit mandate level confedential directory Users {{ astra_at_freeipa_namedir_dsp }}
+      shell: pdpl-file 1:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_dsp }}"/"{{ item [0] }}"
+      loop: "{{ astra_at_freeipa_domain_users }}"
+      when: astra_at_freeipa_create_conf_dir_dsp_users.changed
+
+    - name: astra_at_freeipa | Create directory Users {{ astra_at_freeipa_namedir_s }}
+      file:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ astra_at_freeipa_namedir_s }}/{{ item [0] }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ item [0] }}@{{ astra_at_freeipa_domain_name }}"
+        group: "{{ item [1] }}"
+      register: astra_at_freeipa_create_conf_dir_s_users
+      loop: "{{ astra_at_freeipa_domain_users }}"
+    
+    - name: astra_at_freeipa | Sets default ACL for directory Users {{ astra_at_freeipa_namedir_s }}
+      acl:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ astra_at_freeipa_namedir_s }}/{{ item [0] }}"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      loop: "{{ astra_at_freeipa_domain_users }}"
+    
+    - name: astra_at_freeipa | Edit mandate level confedential directory Users {{ astra_at_freeipa_namedir_s }}
+      shell: pdpl-file 2:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_s }}"/"{{ item [0] }}"
+      loop: "{{ astra_at_freeipa_domain_users }}"
+      when: astra_at_freeipa_create_conf_dir_s_users.changed
+    
+    - name: astra_at_freeipa | Create directory Users {{ astra_at_freeipa_namedir_ss }}
+      file:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ astra_at_freeipa_namedir_ss }}/{{ item [0] }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ item [0] }}@{{ astra_at_freeipa_domain_name }}"
+        group: "{{ item [1] }}"
+      register: astra_at_freeipa_create_conf_dir_ss_users
+      loop: "{{ astra_at_freeipa_domain_users }}"
+    
+    - name: astra_at_freeipa | Sets default ACL for directory Users {{ astra_at_freeipa_namedir_ss }}
+      acl:
+        path: "/{{ astra_at_freeipa_namedir_docs }}/{{ astra_at_freeipa_namedir_ss }}/{{ item [0] }}"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      loop: "{{ astra_at_freeipa_domain_users }}"
+
+    - name: astra_at_freeipa | Edit mandate level confedential directory Users {{ astra_at_freeipa_namedir_ss }}
+      shell: pdpl-file 3:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_ss }}"/"{{ item [0] }}"
+      loop: "{{ astra_at_freeipa_domain_users }}"
+      when: astra_at_freeipa_create_conf_dir_ss_users.changed
+    
+    - name: astra_at_freeipa | Remove bit CCNR mandate level confedential directory
+      shell: |
+        pdpl-file -R 1:0:0 /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_dsp }}"
+        pdpl-file -R 2:0:0 /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_s }}"
+        pdpl-file -R 3:0:0 /"{{ astra_at_freeipa_namedir_docs }}"/"{{ astra_at_freeipa_namedir_ss }}"
+      when: astra_at_freeipa_create_conf_dir.changed
+  when: astra_at_freeipa_namedir_docs_create and inventory_hostname == astra_at_freeipa_domain_server
+
+- name: astra_at_freeipa | Initialization FreeIPA Clients
+  shell: astra-freeipa-client -d {{ astra_at_freeipa_domain_name }} -u {{ astra_at_freeipa_domain_admin }} -p {{ astra_at_freeipa_domain_admin_password }} -y
+  when: astra_at_freeipa_client_packages_install.changed and inventory_hostname != astra_at_freeipa_domain_server
+
+- name: astra_at_freeipa | reset ssh connection to allow user changes to affect 'current login user'
+  meta: reset_connection
+
+- block:
+    - name: astra_at_freeipa | Create a confedential directory FreeIPA Clients
+      file:
+        path: "/{{ astra_at_freeipa_namedir_docs }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ astra_at_freeipa_owner_conf_dir }}@{{ astra_at_freeipa_domain_name }}"
+        group: "{{ astra_at_freeipa_group_conf_dir }}"
+      register: astra_at_freeipa_create_conf_dir_on_clients
+
+    - name: astra_at_freeipa | Edit mandate level confedential directory FreeIPA Clients
+      shell: pdpl-file 3:0:0:ccnr /"{{ astra_at_freeipa_namedir_docs }}"
+      when: astra_at_freeipa_create_conf_dir_on_clients.changed
+
+    - name: astra_at_freeipa | Setting pam_mount for auto mount directory {{ astra_at_freeipa_namedir_docs }}
+      template:
+        src: "{{ astra_at_freeipa_templates_path }}/pam_mount.conf.xml.j2"
+        dest: /etc/security/pam_mount.conf.xml
+        owner: root
+        group: root
+        mode: '0644'
+    
+    - name: astra_at_freeipa | Remove pam_mount in file common-session
+      lineinfile:
+        path: /etc/pam.d/common-session
+        regexp: '^session\s+optional\s+pam_mount.so'
+        state: absent
+    
+    - name: astra_at_freeipa | Edit pam_mount in file login, fly-dm
+      lineinfile:
+        path: "{{ item.path }}"
+        regexp: "{{ item.reg }}"
+        line: "{{ item.line }}"
+        insertafter: "{{ item.after }}"
+      loop:
+        - { path: '/etc/pam.d/login', reg: '^session optional pam_mount.so', line: 'session optional pam_mount.so', after: 'session required pam_parsec_mac.so' }
+        - { path: '/etc/pam.d/login', reg: '^session \[success=1 default=ignore\] pam_localuser.so.*', line: 'session [success=1 default=ignore] pam_localuser.so', after: 'session required pam_parsec_mac.so' }
+        - { path: '/etc/pam.d/fly-dm', reg: '^session optional pam_mount.so', line: 'session optional pam_mount.so', after: 'session required pam_parsec_mac.so' }
+        - { path: '/etc/pam.d/fly-dm', reg: '^session \[success=1 default=ignore\] pam_localuser.so.*', line: 'session [success=1 default=ignore] pam_localuser.so', after: 'session required pam_parsec_mac.so' }
+  when: astra_at_freeipa_mount_directory_docs and inventory_hostname != astra_at_freeipa_domain_server

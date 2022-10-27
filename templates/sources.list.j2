@@ -1,0 +1,17 @@
+{% if ( inventory_hostname == astra_at_freeipa_domain_server and astra_at_freeipa_repo_main_local_create == true ) %}
+# Репозиторий основного диска
+deb file:{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_main }} {{ ansible_facts.lsb.codename }} main contrib non-free
+{% elif ( inventory_hostname != astra_at_freeipa_domain_server and astra_at_freeipa_repo_main_local_create == true ) %}
+# Репозиторий основного диска
+deb http://{{ astra_at_freeipa_domain_server }}.{{ astra_at_freeipa_domain_name }}{{ astra_at_freeipa_repo_dir_http }}/{{ astra_at_freeipa_repo_dir_main }} {{ ansible_facts.lsb.codename }} main contrib non-free
+{% else %}
+deb cdrom:[OS Astra Linux {{ ansible_facts.distribution_version }} {{ ansible_facts.lsb.codename }} - amd64 DVD ]/ {{ ansible_facts.lsb.codename }} contrib main non-free
+{% endif %}
+{% if ( inventory_hostname == astra_at_freeipa_domain_server and astra_at_freeipa_repo_update_local_create == true ) %}
+# Репозиторий диска с обновлениями
+deb file:{{ astra_at_freeipa_repo_dir }}/{{ astra_at_freeipa_repo_dir_update }} {{ ansible_facts.lsb.codename }} main contrib non-free
+{% elif ( inventory_hostname != astra_at_freeipa_domain_server and astra_at_freeipa_repo_update_local_create == true ) %}
+# Репозиторий диска с обновлениями
+deb http://{{ astra_at_freeipa_domain_server }}.{{ astra_at_freeipa_domain_name }}{{ astra_at_freeipa_repo_dir_http }}/{{ astra_at_freeipa_repo_dir_update }} {{ ansible_facts.lsb.codename }} main contrib non-free
+{% else %}
+{% endif %}

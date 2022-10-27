@@ -1,0 +1,4 @@
+# Network nodes as generated through Ansible.
+
+search {{ astra_at_freeipa_domain_name }}
+nameserver {{ hostvars[astra_at_freeipa_domain_server]['ansible_facts']['eth0']['ipv4']['address'] }}

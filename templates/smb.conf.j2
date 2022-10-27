@@ -1,0 +1,20 @@
+### Added by Ansible Playbook Installer ###
+
+[global]
+debug pid = yes
+#config backend = registry
+include = registry
+use socket MAC label = YES
+server signing = required
+server max protocol = NT1
+server min protocol = NT1
+
+[{{ astra_at_freeipa_namedir_docs }}]
+comment = For security docs
+guest ok = yes
+read only = no
+path = /{{ astra_at_freeipa_namedir_docs }}
+create mask = 0660
+directory mask = 0770
+force create mode = 0660
+force directory mode = 0770

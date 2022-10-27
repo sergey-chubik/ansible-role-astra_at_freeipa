@@ -1,0 +1,76 @@
+---
+# defaults file for astra_at_freeipa
+astra_at_freeipa_files_path: "{{ role_path }}/files"
+astra_at_freeipa_templates_path: "{{ role_path }}/templates"
+
+# Создать репозиторий базового диска на сервере FreeIPA (true-создавать, false-несоздавать):
+astra_at_freeipa_repo_main_local_create: true
+# Создать репозиторий диска с обновлениями на сервере FreeIPA (true-создавать, false-несоздавать):
+astra_at_freeipa_repo_update_local_create: false
+
+# Путь до директории где находятся ISO образы основного диска и диска с обновлениями
+astra_at_freeipa_iso_path: /home/user/astra
+# Названия ISO образов (базового и если нужно то образа с обновлениями):
+astra_at_freeipa_iso_main_16: smolensk-1.6.iso
+astra_at_freeipa_iso_update_16: astra-update20211126SE16.iso
+astra_at_freeipa_iso_main_17: smolensk-1.7.iso
+astra_at_freeipa_iso_update_17: astra-update20211126SE17.iso
+# Директория где будут созданы репозитории основного диска и диска с обновлениями:
+astra_at_freeipa_repo_dir: /srv/repo/smolensk
+astra_at_freeipa_repo_dir_main: main
+astra_at_freeipa_repo_dir_update: update
+astra_at_freeipa_repo_dir_iso1: iso1
+astra_at_freeipa_repo_dir_iso2: iso2
+# Директория, которая анонсирована по HTTP-протоколу:
+astra_at_freeipa_repo_dir_http: /repo/smolensk
+
+# Настройка загрузчика grub (true-настройка выполняется, false-не выпоняется):
+astra_at_freeipa_grub_edit: false
+astra_at_freeipa_grub_timeout: 2
+astra_at_freeipa_grub_password: 111111Aa
+astra_at_freeipa_fstab_secdelrnd: 2
+
+# Установка обновлений операционной системы (true-устанавливаем обновления, false-не устанавливаем):
+astra_at_freeipa_os_update: false
+# Способ установки обновления (dist_upgrade или astra_update):
+astra_at_freeipa_os_update_tool: astra_update
+
+# Задаем имя сервера и название домена FreeIPA:
+astra_at_freeipa_domain_server: dc
+astra_at_freeipa_domain_name: domain.ipa
+# Задаем пароль администратора домена и группы по умолчанию для пользователей домена:
+astra_at_freeipa_domain_admin: admin
+astra_at_freeipa_domain_admin_password: 111111Aa
+
+# Задаем пользователей FreeIPA и их группу:
+astra_at_freeipa_domain_users: 
+  - [user1, user11]
+  - [user2, user22]
+astra_at_freeipa_domain_users_list: 
+  - user1
+  - user2
+astra_at_freeipa_domain_users_password: 1qaz!QAZ
+# Задаем период действия пароля для новых пользователей FreeIPA (год,месяц,день,час,мин,сек)
+astra_at_freeipa_domain_users_password_expiration: 20221101235959
+
+# Задаем название уровней конфеденциальности:
+astra_at_freeipa_domain_namelevel0: Несекретно
+astra_at_freeipa_domain_namelevel1: ДСП
+astra_at_freeipa_domain_namelevel2: Секретно
+astra_at_freeipa_domain_namelevel3: Совершенно_секретно
+# Владелец/группа директории с конфеденциальными документами:
+astra_at_freeipa_owner_conf_dir: admin
+astra_at_freeipa_group_conf_dir: ipausersall
+
+# Секция с настройками директории с конфеденциальными документами (по умолчанию DOCS):
+astra_at_freeipa_namedir_docs_create: true
+astra_at_freeipa_namedir_docs: DOCS
+astra_at_freeipa_namedir_ns: Несекретно
+astra_at_freeipa_namedir_dsp: ДСП
+astra_at_freeipa_namedir_s: Секретно
+astra_at_freeipa_namedir_ss: Совершенно_секретно
+
+# Настройка автомонтирования директории с конфеденциальными документами на клиентах FreeIPA (модуль pam_mount)
+astra_at_freeipa_mount_directory_docs: true
+astra_at_freeipa_mount_directory_point: "/{{ astra_at_freeipa_namedir_docs }}"
+astra_at_freeipa_mount_directory_options: "rw,user=%(USER),cruid=%(USER),uid=%(USERUID),gid=%(USERGID),nosharesock,iocharset=utf8,nosetuids,perm,sec=krb5i,file_mode=0660,dir_mode=0770,vers=1.0"
